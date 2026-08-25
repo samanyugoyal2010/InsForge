@@ -2,10 +2,10 @@
 
 On-demand evaluation for `MemoryService.recall()` hybrid RRF retrieval.
 
-This is **Phase 1** of [InsForge#1908](https://github.com/InsForge/InsForge/issues/1908): a fixture
-corpus plus a scoring script that re-derives whether `DEFAULT_RECALL_THRESHOLD` still fits the
-current embedding model. It does **not** change retrieval design, and it is **not** wired into CI
-(embedding calls need a live OpenRouter-backed stack and cost money).
+This is **Phase 1–2** of [InsForge#1908](https://github.com/InsForge/InsForge/issues/1908): a fixture
+corpus plus a scoring script, with **injectable** embed model and default recall threshold so
+sweeps do not require a source edit. It does **not** change hybrid RRF retrieval, and it is
+**not** wired into CI (embedding calls need a live OpenRouter-backed stack and cost money).
 
 Corpus and harness design adapted from
 [ssrajadh/insforge-memory-lab](https://github.com/ssrajadh/insforge-memory-lab) (Apache-2.0).
@@ -66,8 +66,23 @@ npm run memory:eval:calibrate
 
 Optional flags:
 
-- `--thresholds=0.35,0.4,0.45,1.0` — custom sweep points
+- `--thresholds=0.35,0.4,0.45,1.0` — per-request vector-arm sweep (no server restart)
 - `--limit=3` — change recall `limit` (compare with care; MRR is the cross-limit metric)
+- `--embed-model=openai/text-embedding-3-large` — reminder only; set `MEMORY_EMBED_MODEL` on the stack, restart, and re-seed
+
+## Injectable knobs (Phase 2)
+
+The HTTP API already accepts per-request `threshold`. The **default** floor and the embedder used
+for writes and queries are process env on InsForge (documented in `.env.example`):
+
+| Env | Default | Notes |
+|---|---|---|
+| `MEMORY_EMBED_MODEL` | `openai/text-embedding-3-small` | Used for both remember() and recall(). Re-seed after changing. |
+| `MEMORY_EMBED_DIMENSIONS` | `1536` | Must match the model. |
+| `MEMORY_RECALL_THRESHOLD` | `0.45` | Used when a recall request omits `threshold`. |
+
+Cosine distributions are not comparable across embedding models. Mixing two models in one scope
+silently returns junk rankings.
 
 ## Arm isolation trick
 
@@ -81,9 +96,9 @@ exactly what the vector arm contributed.
 
 - Macro-average over **positive** queries only.
 - **Negative** queries report `noise` = mean results returned when the right answer is none.
-- `threshold 1.0` is keyword-only; compare it to the shipped `0.45` row for vector lift.
-- Do **not** treat one corpus as proof the shipped constant is wrong — only that it is
-  re-derivable. Changing `DEFAULT_RECALL_THRESHOLD` is a separate decision (Phase 3 in #1908).
+- `threshold 1.0` is keyword-only; compare it to the shipped default row for vector lift.
+- Changing `DEFAULT_RECALL_THRESHOLD` / `MEMORY_RECALL_THRESHOLD` from the shipped default is a
+  separate decision (Phase 3 in #1908).
 
 ## Unit tests
 

@@ -3,7 +3,13 @@
 //
 //   node harness.mjs seed    [--scope S]   store the labeled fixture corpus
 //   node harness.mjs sweep   [--scope S] [--limit K] [--thresholds a,b,c]
+//                              [--embed-model M]  (reminder: set MEMORY_EMBED_MODEL on the stack)
 //   node harness.mjs report  [--in results.json]
+//
+// Thresholds are swept per-request (recallRequestSchema.threshold). The embed
+// model is a process env on the InsForge server (MEMORY_EMBED_MODEL) because
+// stored vectors must be produced by the same model as query vectors — there
+// is no HTTP field that can swap it without re-seeding.
 //
 // What it measures: precision / recall / F1 / MRR of POST /api/memory/recall
 // against a hand-labeled fixture set, swept across recall threshold values.
@@ -241,10 +247,27 @@ const commands = {
 const cmd = a._[0];
 if (!commands[cmd]) {
   console.log(
-    'usage: harness.mjs <seed|sweep|report> [--scope=S] [--limit=K] [--thresholds=a,b,c]'
+    'usage: harness.mjs <seed|sweep|report> [--scope=S] [--limit=K] [--thresholds=a,b,c] [--embed-model=M]'
   );
   process.exit(1);
 }
+
+if (cmd === 'seed' || cmd === 'sweep') {
+  console.log(
+    'injection: per-request --thresholds sweep the vector arm over HTTP.\n' +
+      '           MEMORY_EMBED_MODEL / MEMORY_RECALL_THRESHOLD / MEMORY_EMBED_DIMENSIONS\n' +
+      '           are read by the InsForge process (see .env.example). Changing the\n' +
+      '           embedder requires a stack restart and a fresh seed — do not mix models\n' +
+      '           in one scope.\n'
+  );
+  if (a['embed-model']) {
+    console.log(
+      `requested embed-model=${a['embed-model']} — set MEMORY_EMBED_MODEL to this value ` +
+        `on the InsForge stack, restart, then seed a fresh scope.\n`
+    );
+  }
+}
+
 Promise.resolve(commands[cmd]()).catch((err) => {
   console.error(`error: ${err.message}`);
   process.exit(1);

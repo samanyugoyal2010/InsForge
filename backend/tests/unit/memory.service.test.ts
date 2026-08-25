@@ -42,6 +42,7 @@ const service = MemoryService.getInstance();
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
   similarRows = [];
   embedMock.mockResolvedValue({ data: [{ embedding: [0.1, 0.2, 0.3] }] });
   installPool();
@@ -156,6 +157,37 @@ describe('MemoryService.recall / index', () => {
     const res = await service.recall({ scope: 's', query: 'q', limit: 5 });
     expect(res[0]).toMatchObject({ id: 'r1', similarity: 0.71 });
     expect(res[0].updated_at).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('passes MEMORY_EMBED_MODEL into createEmbeddings and INSERT', async () => {
+    vi.stubEnv('MEMORY_EMBED_MODEL', 'openai/text-embedding-3-large');
+    vi.stubEnv('MEMORY_EMBED_DIMENSIONS', '3072');
+    await service.remember({ scope: 's', kind: 'fact', title: 't', content: 'c' });
+    expect(embedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'openai/text-embedding-3-large',
+        dimensions: 3072,
+      })
+    );
+    const insert = poolQueryMock.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO'));
+    expect(insert![1][5]).toBe('openai/text-embedding-3-large');
+    vi.unstubAllEnvs();
+  });
+
+  it('uses MEMORY_RECALL_THRESHOLD when recall omits threshold', async () => {
+    vi.stubEnv('MEMORY_RECALL_THRESHOLD', '0.35');
+    await service.recall({ scope: 's', query: 'q', limit: 5 });
+    const recallCall = poolQueryMock.mock.calls.find(([sql]) => String(sql).includes('WITH q AS'));
+    expect(recallCall![1][3]).toBe(0.35);
+    vi.unstubAllEnvs();
+  });
+
+  it('honors an explicit per-request threshold over the env default', async () => {
+    vi.stubEnv('MEMORY_RECALL_THRESHOLD', '0.35');
+    await service.recall({ scope: 's', query: 'q', limit: 5, threshold: 0.5 });
+    const recallCall = poolQueryMock.mock.calls.find(([sql]) => String(sql).includes('WITH q AS'));
+    expect(recallCall![1][3]).toBe(0.5);
+    vi.unstubAllEnvs();
   });
 
   it('returns the title index for a scope', async () => {

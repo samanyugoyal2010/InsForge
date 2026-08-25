@@ -100,6 +100,9 @@ exactly what the vector arm contributed.
   length), not Precision@k — compare ranking quality across limits with MRR.
 - **Negative** queries report `noise` = mean results returned when the right answer is none.
 - `threshold 1.0` is keyword-only; compare it to the shipped default row for vector lift.
+  `calibrate.mjs` uses the same ablation: cuts are counted only on vector-only hits
+  (present at threshold 0, absent at 1.0) so keyword hits outside the vector top-20
+  are not treated as vector-arm losses.
 - On `baseline-limit5.json` (text-embedding-3-small, limit=5), 0.35 balances F1 (~0.72), MRR
   (~0.93), and semantic F1 (~0.65) with zero noise. 0.40 trades some recall for a modest precision
   gain; 0.45 drops both precision and F1 versus 0.35. Re-run the harness after changing embed model

@@ -9,7 +9,8 @@ import {
   pickLatestResultFile,
   assertEmptyScope,
   assertFixtureOnlyScope,
-  vectorEligibleRows,
+  fixtureHitsFromRecall,
+  classifyCalibrateTarget,
 } from '../../src/services/memory/eval/cli.mjs';
 
 describe('eval CLI helpers', () => {
@@ -45,16 +46,30 @@ describe('eval CLI helpers', () => {
     expect(pickLatestResultFile(dir)).toBe(baseline);
   });
 
-  it('counts vector-arm cuts only on similarities above 0', () => {
-    const rows = [
-      { similarity: 0.5 },
-      { similarity: -0.1 },
-      { similarity: null },
-      { similarity: 0.32 },
-    ];
-    const eligible = vectorEligibleRows(rows);
-    expect(eligible).toHaveLength(2);
-    expect(eligible.filter((r) => r.similarity <= 0.35)).toHaveLength(1);
+  it('classifies vector-only vs keyword-retained using threshold 0 vs 1.0', () => {
+    const titleToFixture = new Map([
+      ['Vec only', 'm-vec'],
+      ['Kw outside top 20', 'm-kw'],
+    ]);
+    const atZero = fixtureHitsFromRecall(
+      [
+        { title: 'Vec only', similarity: 0.32 },
+        { title: 'Kw outside top 20', similarity: 0.51 },
+      ],
+      titleToFixture
+    );
+    const atKeywordOnly = fixtureHitsFromRecall(
+      [{ title: 'Kw outside top 20', similarity: 0.51 }],
+      titleToFixture
+    );
+    expect(classifyCalibrateTarget('m-vec', atZero, atKeywordOnly).kind).toBe('vector-only');
+    expect(classifyCalibrateTarget('m-kw', atZero, atKeywordOnly).kind).toBe('keyword-retained');
+    expect(classifyCalibrateTarget('m-missing', atZero, atKeywordOnly).kind).toBe('missing');
+    const vectorOnly = ['m-vec', 'm-kw']
+      .map((id) => classifyCalibrateTarget(id, atZero, atKeywordOnly))
+      .filter((r) => r.kind === 'vector-only');
+    expect(vectorOnly).toHaveLength(1);
+    expect(vectorOnly.filter((r) => r.similarity <= 0.35)).toHaveLength(1);
   });
 
   it('rejects a nonempty seed scope and a polluted sweep scope', () => {

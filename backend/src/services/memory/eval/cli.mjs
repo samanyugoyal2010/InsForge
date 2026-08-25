@@ -63,12 +63,41 @@ export function pickLatestResultFile(resultsDir) {
 }
 
 /**
- * Rows the vector arm can admit at threshold 0 (`similarity > 0`).
- * Keyword-only fused hits get a fallback cosine that can be ≤ 0 and are not
- * dropped by raising DEFAULT_RECALL_THRESHOLD.
+ * Map recalled memories to fixture ids (first rank wins on duplicate titles).
+ * @param {Array<{ title: string, similarity: number }>} recalled
+ * @param {Map<string, string>} titleToFixture
  */
-export function vectorEligibleRows(rows) {
-  return rows.filter((row) => row.similarity !== null && row.similarity > 0);
+export function fixtureHitsFromRecall(recalled, titleToFixture) {
+  const byFixture = new Map();
+  recalled.forEach((memory, index) => {
+    const fixtureId = titleToFixture.get(memory.title);
+    if (fixtureId && !byFixture.has(fixtureId)) {
+      byFixture.set(fixtureId, { similarity: memory.similarity, rank: index + 1 });
+    }
+  });
+  return byFixture;
+}
+
+/**
+ * Separate vector-only hits from keyword-retained ones.
+ *
+ * `threshold: 1.0` empties the vector arm, so those ids are keyword-reachable.
+ * A same-model keyword hit outside the vector top-20 still gets a positive
+ * fallback cosine at threshold 0 — it must not count as a vector-arm cut.
+ *
+ * @param {string} relId
+ * @param {Map<string, { similarity: number, rank: number }>} atZero
+ * @param {Map<string, { similarity: number, rank: number }>} atKeywordOnly
+ */
+export function classifyCalibrateTarget(relId, atZero, atKeywordOnly) {
+  const hit = atZero.get(relId);
+  if (!hit) {
+    return { kind: 'missing', target: relId, similarity: null, rank: null };
+  }
+  if (atKeywordOnly.has(relId)) {
+    return { kind: 'keyword-retained', target: relId, ...hit };
+  }
+  return { kind: 'vector-only', target: relId, ...hit };
 }
 
 export function assertEmptyScope(entries, scope) {

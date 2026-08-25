@@ -14,7 +14,12 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { memory } from './client.mjs';
-import { assertFixtureOnlyScope, valueAfterFlag, vectorEligibleRows } from './cli.mjs';
+import {
+  assertFixtureOnlyScope,
+  valueAfterFlag,
+  fixtureHitsFromRecall,
+  classifyCalibrateTarget,
+} from './cli.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const { memories, queries } = JSON.parse(
@@ -32,39 +37,41 @@ const rows = [];
 for (const q of queries.filter((x) => x.relevant.length)) {
   // Public recall() fuses at most 20 vector + 20 keyword hits. Request the
   // schema max so we see as much of that union as the API will return.
-  const { memories: got } = await memory.recall({ scope, query: q.query, limit: 50, threshold: 0 });
+  // threshold 1.0 empties the vector arm — those ids are keyword-retained.
+  const [{ memories: atZero }, { memories: atKeywordOnly }] = await Promise.all([
+    memory.recall({ scope, query: q.query, limit: 50, threshold: 0 }),
+    memory.recall({ scope, query: q.query, limit: 50, threshold: 1 }),
+  ]);
+  const zeroHits = fixtureHitsFromRecall(atZero, titleToFixture);
+  const keywordHits = fixtureHitsFromRecall(atKeywordOnly, titleToFixture);
   for (const relId of q.relevant) {
-    const hit = got.find((m) => titleToFixture.get(m.title) === relId);
     rows.push({
       query: q.id,
       type: q.type,
-      target: relId,
-      similarity: hit ? hit.similarity : null,
-      rank: hit ? got.findIndex((m) => titleToFixture.get(m.title) === relId) + 1 : null,
+      ...classifyCalibrateTarget(relId, zeroHits, keywordHits),
     });
   }
 }
 
-console.log('query  type      target  rank  cosine similarity');
-console.log('─'.repeat(58));
+console.log('query  type      target  arm              rank  cosine similarity');
+console.log('─'.repeat(72));
 for (const r of rows) {
   const bar =
     r.similarity === null
       ? '(not retrieved)'
       : '█'.repeat(Math.max(0, Math.round(r.similarity * 40)));
   console.log(
-    `${r.query}   ${r.type.padEnd(9)} ${r.target}   ` +
+    `${r.query}   ${r.type.padEnd(9)} ${r.target}   ${r.kind.padEnd(16)} ` +
       `${String(r.rank ?? '-').padEnd(5)} ${
         r.similarity === null ? '  —  ' : r.similarity.toFixed(3)
       } ${bar}`
   );
 }
 
-const withSim = rows.filter((r) => r.similarity !== null);
-const missing = rows.filter((r) => r.similarity === null);
-const vectorEligible = vectorEligibleRows(rows);
-const keywordOnly = withSim.filter((r) => r.similarity <= 0);
-const byType = (t) => withSim.filter((r) => r.type === t).map((r) => r.similarity);
+const missing = rows.filter((r) => r.kind === 'missing');
+const vectorOnly = rows.filter((r) => r.kind === 'vector-only');
+const keywordRetained = rows.filter((r) => r.kind === 'keyword-retained');
+const byType = (t) => vectorOnly.filter((r) => r.type === t).map((r) => r.similarity);
 const stats = (xs) => {
   if (!xs.length) {
     return 'none';
@@ -75,29 +82,30 @@ const stats = (xs) => {
   return `min ${Math.min(...xs).toFixed(3)}  median ${median.toFixed(3)}  max ${Math.max(...xs).toFixed(3)}`;
 };
 
-console.log(`\nlexical  targets: ${stats(byType('lexical'))}`);
-console.log(`semantic targets: ${stats(byType('semantic'))}`);
+console.log(`\nlexical  vector-only: ${stats(byType('lexical'))}`);
+console.log(`semantic vector-only: ${stats(byType('semantic'))}`);
 if (missing.length) {
   console.log(
     `${missing.length} labeled target(s) were outside the fused recall window ` +
       `(each arm caps at 20). They are omitted from threshold-cut percentages.`
   );
 }
-if (keywordOnly.length) {
+if (keywordRetained.length) {
   console.log(
-    `${keywordOnly.length} labeled target(s) were retrieved by the keyword arm only ` +
-      `(cosine ≤ 0 at threshold 0). Raising the vector threshold does not drop them.`
+    `${keywordRetained.length} labeled target(s) are keyword-retained (present at threshold 1.0). ` +
+      `Raising the vector threshold does not drop them from recall, including same-model ` +
+      `hits that sat outside the vector arm's top 20 with a positive fallback cosine.`
   );
 }
 
 for (const t of [0.35, 0.4, 0.45, 0.5]) {
-  if (!vectorEligible.length) {
-    console.log(`threshold ${t}: no vector-arm labeled targets to cut`);
+  if (!vectorOnly.length) {
+    console.log(`threshold ${t}: no vector-only labeled targets to cut`);
     continue;
   }
-  const cut = vectorEligible.filter((r) => r.similarity <= t).length;
+  const cut = vectorOnly.filter((r) => r.similarity <= t).length;
   console.log(
-    `threshold ${t}: cuts ${cut}/${vectorEligible.length} vector-arm correct answers ` +
-      `(${((cut / vectorEligible.length) * 100).toFixed(0)}%)`
+    `threshold ${t}: cuts ${cut}/${vectorOnly.length} vector-only correct answers ` +
+      `(${((cut / vectorOnly.length) * 100).toFixed(0)}%)`
   );
 }

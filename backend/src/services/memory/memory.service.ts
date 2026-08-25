@@ -15,6 +15,8 @@ const EMBED_DIMENSIONS = 1536;
 const CHAT_MODEL = 'openai/gpt-4o-mini';
 
 // Tuned via offline eval (F1=0.96 at 0.45 vs 0.68 at 0.35 for text-embedding-3-small).
+// Re-derive against fixtures in ./eval/ when EMBED_MODEL or the corpus changes —
+// cosine distributions are not comparable across embedding models.
 const DEFAULT_RECALL_THRESHOLD = 0.45;
 // Tighter — only near-duplicates should trigger the reconcile LLM call.
 const RECONCILE_THRESHOLD = 0.5;

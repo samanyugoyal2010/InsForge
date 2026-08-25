@@ -3,6 +3,11 @@
 
 /**
  * Score one query's retrieved fixture ids against its labeled relevant set.
+ *
+ * `precision` is **list precision** (hits / returned length), not Precision@k.
+ * When the vector arm returns fewer than `limit` rows, a single hit scores 1.0.
+ * Do not compare list precision across different `limit` values — use MRR.
+ *
  * @param {string[]} retrieved fixture ids (or `unknown:…` placeholders)
  * @param {string[]} relevant labeled fixture ids for this query
  */
@@ -12,6 +17,7 @@ export function score(retrieved, relevant) {
   const precision = retrieved.length ? hits.length / retrieved.length : 0;
   const recall = rel.size ? hits.length / rel.size : 1;
   const f1 = precision + recall ? (2 * precision * recall) / (precision + recall) : 0;
+  // List precision is not Precision@k: a short result list can score 1.0.
   // Precision@k is capped at (#relevant / limit), so a single-answer query can
   // never score above 1/limit no matter how good the ranking is. MRR is
   // rank-aware and free of that artifact, so it is the metric to compare across

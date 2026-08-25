@@ -24,13 +24,13 @@ describe('memory retrieval config', () => {
     });
   });
 
-  it('reads MEMORY_EMBED_MODEL and MEMORY_EMBED_DIMENSIONS', () => {
+  it('reads MEMORY_EMBED_MODEL and MEMORY_EMBED_DIMENSIONS=1536', () => {
     const env = {
       MEMORY_EMBED_MODEL: '  openai/text-embedding-3-large  ',
-      MEMORY_EMBED_DIMENSIONS: '3072',
+      MEMORY_EMBED_DIMENSIONS: '1536',
     } as NodeJS.ProcessEnv;
     expect(resolveEmbedModel(env)).toBe('openai/text-embedding-3-large');
-    expect(resolveEmbedDimensions(env)).toBe(3072);
+    expect(resolveEmbedDimensions(env)).toBe(DEFAULT_EMBED_DIMENSIONS);
   });
 
   it('reads MEMORY_RECALL_THRESHOLD including 0', () => {
@@ -56,6 +56,9 @@ describe('memory retrieval config', () => {
     ).toThrow(AppError);
     expect(() =>
       resolveEmbedDimensions({ MEMORY_EMBED_DIMENSIONS: '-4' } as NodeJS.ProcessEnv)
+    ).toThrow(AppError);
+    expect(() =>
+      resolveEmbedDimensions({ MEMORY_EMBED_DIMENSIONS: '3072' } as NodeJS.ProcessEnv)
     ).toThrow(AppError);
   });
 });

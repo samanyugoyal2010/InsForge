@@ -40,6 +40,27 @@ function installPool() {
 
 const service = MemoryService.getInstance();
 
+/** INSERT (scope, kind, title, content, embedding, embedding_model, source) */
+function insertParams(): unknown[] | undefined {
+  return poolQueryMock.mock.calls.find(([sql]) =>
+    String(sql).includes('INSERT INTO memory.memories')
+  )?.[1] as unknown[] | undefined;
+}
+
+/** Hybrid recall query: [$1 vector, $2 query, $3 scope, $4 threshold, $5 limit] */
+function recallParams(): unknown[] | undefined {
+  return poolQueryMock.mock.calls.find(
+    ([sql]) => String(sql).includes('WITH q AS') && String(sql).includes('FULL OUTER JOIN')
+  )?.[1] as unknown[] | undefined;
+}
+
+/** UPDATE SET kind, title, content, embedding, embedding_model, source */
+function updateParams(): unknown[] | undefined {
+  return poolQueryMock.mock.calls.find(([sql]) =>
+    String(sql).includes('UPDATE memory.memories')
+  )?.[1] as unknown[] | undefined;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
@@ -79,7 +100,7 @@ describe('MemoryService.remember — reconcile', () => {
       String(sql).includes('UPDATE memory.memories')
     );
     expect(updateCall).toBeDefined();
-    expect(updateCall![1][0]).toBe('decision'); // kind is updated, not retained
+    expect(updateParams()?.[0]).toBe('decision'); // kind is updated, not retained
   });
 
   it('falls back to ADD when the reconciler returns a hallucinated target_id', async () => {
@@ -161,32 +182,44 @@ describe('MemoryService.recall / index', () => {
 
   it('passes MEMORY_EMBED_MODEL into createEmbeddings and INSERT', async () => {
     vi.stubEnv('MEMORY_EMBED_MODEL', 'openai/text-embedding-3-large');
-    vi.stubEnv('MEMORY_EMBED_DIMENSIONS', '3072');
     await service.remember({ scope: 's', kind: 'fact', title: 't', content: 'c' });
     expect(embedMock).toHaveBeenCalledWith(
       expect.objectContaining({
         model: 'openai/text-embedding-3-large',
-        dimensions: 3072,
+        dimensions: 1536,
       })
     );
-    const insert = poolQueryMock.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO'));
-    expect(insert![1][5]).toBe('openai/text-embedding-3-large');
+    expect(insertParams()?.[5]).toBe('openai/text-embedding-3-large');
+    vi.unstubAllEnvs();
+  });
+
+  it('persists MEMORY_EMBED_MODEL on UPDATE as well as the new vector', async () => {
+    const matchId = '11111111-1111-4111-8111-111111111111';
+    similarRows = [{ id: matchId, kind: 'fact', title: 'old', content: 'old', similarity: 0.8 }];
+    chatMock.mockResolvedValue({
+      text: `{"action":"UPDATE","target_id":"${matchId}","title":"new","content":"merged"}`,
+    });
+    vi.stubEnv('MEMORY_EMBED_MODEL', 'openai/text-embedding-3-large');
+    await service.remember({ scope: 's', kind: 'decision', title: 't', content: 'c' });
+    const sql = poolQueryMock.mock.calls.find(([query]) =>
+      String(query).includes('UPDATE memory.memories')
+    )?.[0];
+    expect(String(sql)).toContain('embedding_model');
+    expect(updateParams()?.[4]).toBe('openai/text-embedding-3-large');
     vi.unstubAllEnvs();
   });
 
   it('uses MEMORY_RECALL_THRESHOLD when recall omits threshold', async () => {
     vi.stubEnv('MEMORY_RECALL_THRESHOLD', '0.35');
     await service.recall({ scope: 's', query: 'q', limit: 5 });
-    const recallCall = poolQueryMock.mock.calls.find(([sql]) => String(sql).includes('WITH q AS'));
-    expect(recallCall![1][3]).toBe(0.35);
+    expect(recallParams()?.[3]).toBe(0.35);
     vi.unstubAllEnvs();
   });
 
   it('honors an explicit per-request threshold over the env default', async () => {
     vi.stubEnv('MEMORY_RECALL_THRESHOLD', '0.35');
     await service.recall({ scope: 's', query: 'q', limit: 5, threshold: 0.5 });
-    const recallCall = poolQueryMock.mock.calls.find(([sql]) => String(sql).includes('WITH q AS'));
-    expect(recallCall![1][3]).toBe(0.5);
+    expect(recallParams()?.[3]).toBe(0.5);
     vi.unstubAllEnvs();
   });
 

@@ -37,11 +37,18 @@
 //
 // Corpus and harness design adapted from ssrajadh/insforge-memory-lab (Apache-2.0).
 
-import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { memory } from './client.mjs';
 import { score, aggregateRow } from './score.mjs';
+import {
+  parseArgs,
+  resultFileSlug,
+  pickLatestResultFile,
+  assertEmptyScope,
+  assertFixtureOnlyScope,
+} from './cli.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CORPUS = resolve(HERE, 'fixtures/corpus.json');
@@ -52,18 +59,7 @@ const DEFAULT_THRESHOLDS = [0, 0.2, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.7, 0
 const SHIPPED_THRESHOLD = 0.35;
 
 function args() {
-  const out = { _: [] };
-  for (const a of process.argv.slice(2)) {
-    const m = a.match(/^--([^=]+)=(.*)$/);
-    if (m) {
-      out[m[1]] = m[2];
-    } else if (a.startsWith('--')) {
-      out[a.slice(2)] = true;
-    } else {
-      out._.push(a);
-    }
-  }
-  return out;
+  return parseArgs(process.argv.slice(2));
 }
 
 const corpus = () => JSON.parse(readFileSync(CORPUS, 'utf8'));
@@ -72,7 +68,9 @@ const corpus = () => JSON.parse(readFileSync(CORPUS, 'utf8'));
 
 async function seed(scope) {
   const { memories } = corpus();
-  console.log(`seeding ${memories.length} memories into scope "${scope}"\n`);
+  const { entries: existing } = await memory.index(scope);
+  assertEmptyScope(existing, scope);
+  console.log(`seeding ${memories.length} memories into empty scope "${scope}"\n`);
 
   const tally = {};
   for (const m of memories) {
@@ -99,16 +97,7 @@ async function seed(scope) {
   // Reconcile can collapse two fixtures into one. That is correct product
   // behaviour but it breaks the 1:1 label mapping, so surface it loudly.
   const { entries } = await memory.index(scope);
-  const stored = new Set(entries.map((e) => e.title));
-  const missing = memories.filter((m) => !stored.has(m.title));
-  if (missing.length) {
-    console.log(
-      `\n⚠ ${missing.length} fixture(s) were merged or suppressed by the reconcile pass ` +
-        `and are not individually retrievable:\n` +
-        missing.map((m) => `    ${m.id}  ${m.title}`).join('\n') +
-        `\n  Their queries will show as unreachable recall. Use a fresh scope to retry.`
-    );
-  }
+  assertFixtureOnlyScope(entries, memories, scope);
   console.log(`\n${entries.length} memories now in scope "${scope}".`);
 }
 
@@ -119,9 +108,7 @@ async function sweep(scope, limit, thresholds) {
 
   // Map stored uuid -> fixture id by exact title.
   const { entries } = await memory.index(scope);
-  if (!entries.length) {
-    throw new Error(`scope "${scope}" is empty — run: node harness.mjs seed --scope=${scope}`);
-  }
+  assertFixtureOnlyScope(entries, memories, scope);
   const titleToFixture = new Map(memories.map((m) => [m.title, m.id]));
   const idToFixture = new Map();
   for (const e of entries) {
@@ -161,7 +148,7 @@ async function sweep(scope, limit, thresholds) {
     queries: { positive: positives.length, negative: negatives.length },
     rows,
   };
-  const path = resolve(RESULTS_DIR, `results-${scope}-limit${limit}.json`);
+  const path = resolve(RESULTS_DIR, `results-${resultFileSlug(scope)}-limit${limit}.json`);
   writeFileSync(path, JSON.stringify(out, null, 2));
   report(out);
   console.log(`\nfull per-query detail written to ${path}`);
@@ -225,13 +212,7 @@ function report(data) {
 // Sweeps are written per scope and per limit, so `report` with no --in picks
 // the most recent one rather than guessing a fixed filename.
 function latestResults() {
-  const files = readdirSync(RESULTS_DIR)
-    .filter((f) => f.startsWith('results-') && f.endsWith('.json'))
-    .sort();
-  if (!files.length) {
-    throw new Error(`no sweep results in ${RESULTS_DIR} — run: node harness.mjs sweep`);
-  }
-  return resolve(RESULTS_DIR, files[files.length - 1]);
+  return pickLatestResultFile(RESULTS_DIR);
 }
 
 // ---- main -------------------------------------------------------------------
@@ -244,7 +225,8 @@ const thresholds = a.thresholds ? a.thresholds.split(',').map(Number) : DEFAULT_
 const commands = {
   seed: () => seed(scope),
   sweep: () => sweep(scope, limit, thresholds),
-  report: () => report(JSON.parse(readFileSync(a.in ? resolve(a.in) : latestResults(), 'utf8'))),
+  report: () =>
+    report(JSON.parse(readFileSync(a.in ? resolve(process.cwd(), a.in) : latestResults(), 'utf8'))),
 };
 
 const cmd = a._[0];

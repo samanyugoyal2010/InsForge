@@ -23,7 +23,7 @@ RRF arm through the public API (no DB access, no service patches).
 
 ## Layout
 
-```
+```text
 eval/
   client.mjs              thin /api/memory HTTP client (API key auth)
   score.mjs               pure precision / recall / F1 / MRR helpers
@@ -63,6 +63,7 @@ Or from `backend/`:
 npm run memory:eval:seed
 npm run memory:eval:sweep
 npm run memory:eval:calibrate
+npm run memory:eval:report
 ```
 
 Optional flags:
@@ -79,7 +80,7 @@ for writes and queries are process env on InsForge (documented in `.env.example`
 | Env | Default | Notes |
 |---|---|---|
 | `MEMORY_EMBED_MODEL` | `openai/text-embedding-3-small` | Used for both remember() and recall(). Re-seed after changing. |
-| `MEMORY_EMBED_DIMENSIONS` | `1536` | Must match the model. |
+| `MEMORY_EMBED_DIMENSIONS` | `1536` | Must match `VECTOR(1536)`. Other widths are rejected. |
 | `MEMORY_RECALL_THRESHOLD` | `0.35` | Used when a recall request omits `threshold`. Override via env; other corpora may peak elsewhere. |
 
 Cosine distributions are not comparable across embedding models. Mixing two models in one scope
@@ -95,12 +96,15 @@ exactly what the vector arm contributed.
 
 ## Interpreting results
 
-- Macro-average over **positive** queries only.
+- Macro-average over **positive** queries only. `precision` is list precision (hits / returned
+  length), not Precision@k — compare ranking quality across limits with MRR.
 - **Negative** queries report `noise` = mean results returned when the right answer is none.
 - `threshold 1.0` is keyword-only; compare it to the shipped default row for vector lift.
 - On `baseline-limit5.json` (text-embedding-3-small, limit=5), 0.35 balances F1 (~0.72), MRR
-  (~0.93), and semantic F1 (~0.65) with zero noise; 0.40–0.45 trade recall for marginal precision
-  gains on this corpus. Re-run the harness after changing embed model or corpus.
+  (~0.93), and semantic F1 (~0.65) with zero noise. 0.40 trades some recall for a modest precision
+  gain; 0.45 drops both precision and F1 versus 0.35. Re-run the harness after changing embed model
+  or corpus.
+- Seed only into an **empty** scope. Reusing `eval` (or any nonempty scope) pollutes labels.
 
 ## Unit tests
 

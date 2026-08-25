@@ -30,7 +30,10 @@ async function call(path, body) {
     parsed = { raw: text };
   }
   if (!res.ok) {
-    const detail = parsed.message ?? parsed.error ?? text.slice(0, 200);
+    const detail =
+      parsed && typeof parsed === 'object'
+        ? (parsed.message ?? parsed.error ?? text.slice(0, 200))
+        : text.slice(0, 200);
     throw new Error(`POST ${path} → ${res.status}: ${detail}`);
   }
   // successResponse() returns the payload at the top level (no { data } wrapper).

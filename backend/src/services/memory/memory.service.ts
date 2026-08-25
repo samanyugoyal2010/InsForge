@@ -72,9 +72,9 @@ export class MemoryService {
 
   // ---- helpers ------------------------------------------------------------
 
-  private async embed(text: string): Promise<number[]> {
+  private async embed(text: string, model: string = resolveEmbedModel()): Promise<number[]> {
     const res = await this.embeddingService.createEmbeddings({
-      model: resolveEmbedModel(),
+      model,
       input: text,
       dimensions: resolveEmbedDimensions(),
     });
@@ -189,7 +189,8 @@ Examples:
     source?: string
   ): Promise<RememberResult> {
     const pool = this.dbManager.getPool();
-    const embedding = await this.embed(`${candidate.title}\n${candidate.content}`);
+    const embedModel = resolveEmbedModel();
+    const embedding = await this.embed(`${candidate.title}\n${candidate.content}`, embedModel);
     const similar = await this.findSimilar(scope, embedding, 3, RECONCILE_THRESHOLD);
 
     let action: 'ADD' | 'UPDATE' | 'NOOP' = 'ADD';
@@ -230,7 +231,7 @@ Return JSON {"action":"ADD"|"UPDATE"|"NOOP","target_id"?:string,"title"?:string,
           candidate.title,
           candidate.content,
           this.toVectorLiteral(embedding),
-          resolveEmbedModel(),
+          embedModel,
           source ?? null,
         ]
       );
@@ -240,16 +241,18 @@ Return JSON {"action":"ADD"|"UPDATE"|"NOOP","target_id"?:string,"title"?:string,
     if (action === 'UPDATE' && decision?.target_id) {
       const title = decision.title ?? candidate.title;
       const content = decision.content ?? candidate.content;
-      const newEmbedding = await this.embed(`${title}\n${content}`);
+      const newEmbedding = await this.embed(`${title}\n${content}`, embedModel);
       await pool.query(
         `UPDATE memory.memories
-            SET kind = $1, title = $2, content = $3, embedding = $4::vector, source = $5
-          WHERE id = $6 AND scope = $7`,
+            SET kind = $1, title = $2, content = $3, embedding = $4::vector,
+                embedding_model = $5, source = $6
+          WHERE id = $7 AND scope = $8`,
         [
           candidate.kind,
           title,
           content,
           this.toVectorLiteral(newEmbedding),
+          embedModel,
           source ?? null,
           decision.target_id,
           scope,

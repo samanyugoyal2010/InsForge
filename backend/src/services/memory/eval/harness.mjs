@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Memory recall eval harness (Phase 1 of InsForge#1908).
+// Memory recall eval harness (Phase 1–3 of InsForge#1908; Phase 3 shipped default 0.35).
 //
 //   node harness.mjs seed    [--scope S]   store the labeled fixture corpus
 //   node harness.mjs sweep   [--scope S] [--limit K] [--thresholds a,b,c]
@@ -48,6 +48,8 @@ const CORPUS = resolve(HERE, 'fixtures/corpus.json');
 const RESULTS_DIR = resolve(HERE, 'results');
 
 const DEFAULT_THRESHOLDS = [0, 0.2, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.7, 0.8, 1.0];
+// Must match DEFAULT_RECALL_THRESHOLD in ../memory-retrieval.ts
+const SHIPPED_THRESHOLD = 0.35;
 
 function args() {
   const out = { _: [] };
@@ -176,7 +178,8 @@ function report(data) {
   );
   console.log('─'.repeat(95));
   for (const r of rows) {
-    const mark = r.threshold === 0.45 ? ' ←shipped' : r.threshold === 1.0 ? ' ←keyword-only' : '';
+    const mark =
+      r.threshold === SHIPPED_THRESHOLD ? ' ←shipped' : r.threshold === 1.0 ? ' ←keyword-only' : '';
     console.log(
       `${String(r.threshold).padEnd(11)} ${pct(r.precision).padEnd(10)} ` +
         `${pct(r.recall).padEnd(10)} ${pct(r.f1).padEnd(9)} ${pct(r.mrr).padEnd(9)} ` +
@@ -186,12 +189,12 @@ function report(data) {
   }
 
   const best = rows.reduce((a, b) => (b.f1 > a.f1 ? b : a));
-  const shipped = rows.find((r) => r.threshold === 0.45);
+  const shipped = rows.find((r) => r.threshold === SHIPPED_THRESHOLD);
   const keywordOnly = rows.find((r) => r.threshold === 1.0);
 
   console.log(`\nbest F1 ${pct(best.f1)} at threshold ${best.threshold}`);
   if (shipped) {
-    console.log(`shipped default (0.45) F1 ${pct(shipped.f1)}`);
+    console.log(`shipped default (${SHIPPED_THRESHOLD}) F1 ${pct(shipped.f1)}`);
   }
   if (keywordOnly) {
     console.log(
@@ -200,7 +203,7 @@ function report(data) {
     );
     if (shipped) {
       console.log(
-        `vector arm's marginal contribution at 0.45: ` +
+        `vector arm's marginal contribution at ${SHIPPED_THRESHOLD}: ` +
           `F1 +${pct(shipped.f1 - keywordOnly.f1)}, ` +
           `semantic F1 +${pct(shipped.f1Semantic - keywordOnly.f1Semantic)}`
       );

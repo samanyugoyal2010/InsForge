@@ -3,7 +3,9 @@ import { AppError } from '@/utils/errors.js';
 
 export const DEFAULT_EMBED_MODEL = 'openai/text-embedding-3-small';
 export const DEFAULT_EMBED_DIMENSIONS = 1536;
-export const DEFAULT_RECALL_THRESHOLD = 0.45;
+// Shipped default from in-repo eval (text-embedding-3-small, limit=5): see
+// ./eval/results/baseline-limit5.json and ./eval/README.md. Override via MEMORY_RECALL_THRESHOLD.
+export const DEFAULT_RECALL_THRESHOLD = 0.35;
 
 export interface MemoryRetrievalConfig {
   embedModel: string;

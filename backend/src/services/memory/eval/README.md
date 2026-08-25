@@ -2,20 +2,21 @@
 
 On-demand evaluation for `MemoryService.recall()` hybrid RRF retrieval.
 
-This is **Phase 1–2** of [InsForge#1908](https://github.com/InsForge/InsForge/issues/1908): a fixture
+This is **Phase 1–3** of [InsForge#1908](https://github.com/InsForge/InsForge/issues/1908): a fixture
 corpus plus a scoring script, with **injectable** embed model and default recall threshold so
-sweeps do not require a source edit. It does **not** change hybrid RRF retrieval, and it is
-**not** wired into CI (embedding calls need a live OpenRouter-backed stack and cost money).
+sweeps do not require a source edit. **Phase 3** set the shipped default recall threshold to **0.35**,
+derived from the in-repo harness baseline (`results/baseline-limit5.json`). It does **not** change
+hybrid RRF retrieval, and it is **not** wired into CI (embedding calls need a live OpenRouter-backed
+stack and cost money).
 
 Corpus and harness design adapted from
 [ssrajadh/insforge-memory-lab](https://github.com/ssrajadh/insforge-memory-lab) (Apache-2.0).
 
 ## Why this exists
 
-`DEFAULT_RECALL_THRESHOLD` in `memory.service.ts` cites an offline eval that was not previously in
-the tree. Cosine similarity distributions are not comparable across embedding models, so swapping
-`EMBED_MODEL` silently invalidates the constant. Quiet failure mode: recall still returns results,
-just fewer correct ones.
+`DEFAULT_RECALL_THRESHOLD` in `memory-retrieval.ts` is justified by this harness. Cosine similarity
+distributions are not comparable across embedding models, so swapping `EMBED_MODEL` silently
+invalidates the constant. Quiet failure mode: recall still returns results, just fewer correct ones.
 
 This harness lets you re-measure precision / recall / F1 / MRR across thresholds, and isolate each
 RRF arm through the public API (no DB access, no service patches).
@@ -79,7 +80,7 @@ for writes and queries are process env on InsForge (documented in `.env.example`
 |---|---|---|
 | `MEMORY_EMBED_MODEL` | `openai/text-embedding-3-small` | Used for both remember() and recall(). Re-seed after changing. |
 | `MEMORY_EMBED_DIMENSIONS` | `1536` | Must match the model. |
-| `MEMORY_RECALL_THRESHOLD` | `0.45` | Used when a recall request omits `threshold`. |
+| `MEMORY_RECALL_THRESHOLD` | `0.35` | Used when a recall request omits `threshold`. Override via env; other corpora may peak elsewhere. |
 
 Cosine distributions are not comparable across embedding models. Mixing two models in one scope
 silently returns junk rankings.
@@ -97,8 +98,9 @@ exactly what the vector arm contributed.
 - Macro-average over **positive** queries only.
 - **Negative** queries report `noise` = mean results returned when the right answer is none.
 - `threshold 1.0` is keyword-only; compare it to the shipped default row for vector lift.
-- Changing `DEFAULT_RECALL_THRESHOLD` / `MEMORY_RECALL_THRESHOLD` from the shipped default is a
-  separate decision (Phase 3 in #1908).
+- On `baseline-limit5.json` (text-embedding-3-small, limit=5), 0.35 balances F1 (~0.72), MRR
+  (~0.93), and semantic F1 (~0.65) with zero noise; 0.40–0.45 trade recall for marginal precision
+  gains on this corpus. Re-run the harness after changing embed model or corpus.
 
 ## Unit tests
 

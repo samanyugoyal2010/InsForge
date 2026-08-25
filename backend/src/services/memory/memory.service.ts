@@ -9,13 +9,13 @@ import {
   type RememberResult,
   type RecalledMemory,
 } from '@insforge/shared-schemas';
+import {
+  resolveEmbedDimensions,
+  resolveEmbedModel,
+  resolveRecallThreshold,
+} from './memory-retrieval.js';
 
-const EMBED_MODEL = 'openai/text-embedding-3-small';
-const EMBED_DIMENSIONS = 1536;
 const CHAT_MODEL = 'openai/gpt-4o-mini';
-
-// Tuned via offline eval (F1=0.96 at 0.45 vs 0.68 at 0.35 for text-embedding-3-small).
-const DEFAULT_RECALL_THRESHOLD = 0.45;
 // Tighter — only near-duplicates should trigger the reconcile LLM call.
 const RECONCILE_THRESHOLD = 0.5;
 
@@ -74,9 +74,9 @@ export class MemoryService {
 
   private async embed(text: string): Promise<number[]> {
     const res = await this.embeddingService.createEmbeddings({
-      model: EMBED_MODEL,
+      model: resolveEmbedModel(),
       input: text,
-      dimensions: EMBED_DIMENSIONS,
+      dimensions: resolveEmbedDimensions(),
     });
     const vec = res.data[0]?.embedding;
     if (!Array.isArray(vec)) {
@@ -230,7 +230,7 @@ Return JSON {"action":"ADD"|"UPDATE"|"NOOP","target_id"?:string,"title"?:string,
           candidate.title,
           candidate.content,
           this.toVectorLiteral(embedding),
-          EMBED_MODEL,
+          resolveEmbedModel(),
           source ?? null,
         ]
       );
@@ -312,7 +312,7 @@ Return JSON {"action":"ADD"|"UPDATE"|"NOOP","target_id"?:string,"title"?:string,
   }): Promise<RecalledMemory[]> {
     const embedding = await this.embed(params.query);
     const pool = this.dbManager.getPool();
-    const threshold = params.threshold ?? DEFAULT_RECALL_THRESHOLD;
+    const threshold = params.threshold ?? resolveRecallThreshold();
     // Hybrid recall via Reciprocal Rank Fusion (k=60, the standard constant):
     //  - vector arm keeps the cosine threshold, so unrelated queries still
     //    return nothing (no semantic noise);

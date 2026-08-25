@@ -43,22 +43,32 @@ export function resultFileSlug(scope) {
 }
 
 /**
- * Newest sweep dump by mtime. Falls back to the checked-in aggregates baseline
- * so `report` works on a clean checkout.
+ * Prefer a generated sweep (`results-*.json`) by mtime. Use the checked-in
+ * aggregates baseline only when no live sweep file exists (clean checkout).
  */
 export function pickLatestResultFile(resultsDir) {
-  const names = readdirSync(resultsDir).filter(
-    (name) =>
-      name === 'baseline-limit5.json' || (name.startsWith('results-') && name.endsWith('.json'))
-  );
-  if (!names.length) {
-    throw new Error(`no sweep results in ${resultsDir} — run: node harness.mjs sweep`);
+  const names = readdirSync(resultsDir);
+  const sweeps = names.filter((name) => name.startsWith('results-') && name.endsWith('.json'));
+  if (sweeps.length) {
+    sweeps.sort(
+      (left, right) =>
+        statSync(resolve(resultsDir, right)).mtimeMs - statSync(resolve(resultsDir, left)).mtimeMs
+    );
+    return resolve(resultsDir, sweeps[0]);
   }
-  names.sort(
-    (left, right) =>
-      statSync(resolve(resultsDir, right)).mtimeMs - statSync(resolve(resultsDir, left)).mtimeMs
-  );
-  return resolve(resultsDir, names[0]);
+  if (names.includes('baseline-limit5.json')) {
+    return resolve(resultsDir, 'baseline-limit5.json');
+  }
+  throw new Error(`no sweep results in ${resultsDir} — run: node harness.mjs sweep`);
+}
+
+/**
+ * Rows the vector arm can admit at threshold 0 (`similarity > 0`).
+ * Keyword-only fused hits get a fallback cosine that can be ≤ 0 and are not
+ * dropped by raising DEFAULT_RECALL_THRESHOLD.
+ */
+export function vectorEligibleRows(rows) {
+  return rows.filter((row) => row.similarity !== null && row.similarity > 0);
 }
 
 export function assertEmptyScope(entries, scope) {

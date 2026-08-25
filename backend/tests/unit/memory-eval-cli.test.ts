@@ -9,6 +9,7 @@ import {
   pickLatestResultFile,
   assertEmptyScope,
   assertFixtureOnlyScope,
+  vectorEligibleRows,
 } from '../../src/services/memory/eval/cli.mjs';
 
 describe('eval CLI helpers', () => {
@@ -26,15 +27,34 @@ describe('eval CLI helpers', () => {
     expect(resultFileSlug('a/b')).toBe('a%2Fb');
   });
 
-  it('picks the newest result by mtime, including the checked-in baseline name', () => {
+  it('prefers a generated sweep over a newer baseline mtime', () => {
     const dir = mkdtempSync(join(tmpdir(), 'memory-eval-'));
-    const older = join(dir, 'results-z-limit5.json');
-    const newer = join(dir, 'baseline-limit5.json');
-    writeFileSync(older, '{}');
-    writeFileSync(newer, '{}');
-    utimesSync(older, new Date('2026-01-01'), new Date('2026-01-01'));
-    utimesSync(newer, new Date('2026-08-01'), new Date('2026-08-01'));
-    expect(pickLatestResultFile(dir)).toBe(newer);
+    const sweep = join(dir, 'results-eval-limit5.json');
+    const baseline = join(dir, 'baseline-limit5.json');
+    writeFileSync(sweep, '{}');
+    writeFileSync(baseline, '{}');
+    utimesSync(sweep, new Date('2026-01-01'), new Date('2026-01-01'));
+    utimesSync(baseline, new Date('2026-08-01'), new Date('2026-08-01'));
+    expect(pickLatestResultFile(dir)).toBe(sweep);
+  });
+
+  it('falls back to the checked-in baseline when no sweep files exist', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'memory-eval-'));
+    const baseline = join(dir, 'baseline-limit5.json');
+    writeFileSync(baseline, '{}');
+    expect(pickLatestResultFile(dir)).toBe(baseline);
+  });
+
+  it('counts vector-arm cuts only on similarities above 0', () => {
+    const rows = [
+      { similarity: 0.5 },
+      { similarity: -0.1 },
+      { similarity: null },
+      { similarity: 0.32 },
+    ];
+    const eligible = vectorEligibleRows(rows);
+    expect(eligible).toHaveLength(2);
+    expect(eligible.filter((r) => r.similarity <= 0.35)).toHaveLength(1);
   });
 
   it('rejects a nonempty seed scope and a polluted sweep scope', () => {

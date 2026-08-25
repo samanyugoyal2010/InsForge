@@ -47,10 +47,17 @@ function insertParams(): unknown[] | undefined {
   )?.[1] as unknown[] | undefined;
 }
 
-/** Hybrid recall query: [$1 vector, $2 query, $3 scope, $4 threshold, $5 limit] */
+/** Hybrid recall: [$1 vector, $2 query, $3 scope, $4 threshold, $5 limit, $6 embedding_model] */
 function recallParams(): unknown[] | undefined {
   return poolQueryMock.mock.calls.find(
     ([sql]) => String(sql).includes('WITH q AS') && String(sql).includes('FULL OUTER JOIN')
+  )?.[1] as unknown[] | undefined;
+}
+
+/** findSimilar: [$1 vector, $2 scope, $3 threshold, $4 k, $5 embedding_model] */
+function findSimilarParams(): unknown[] | undefined {
+  return poolQueryMock.mock.calls.find(
+    ([sql]) => String(sql).includes('AS similarity') && String(sql).includes('FROM memory.memories')
   )?.[1] as unknown[] | undefined;
 }
 
@@ -220,6 +227,25 @@ describe('MemoryService.recall / index', () => {
     vi.stubEnv('MEMORY_RECALL_THRESHOLD', '0.35');
     await service.recall({ scope: 's', query: 'q', limit: 5, threshold: 0.5 });
     expect(recallParams()?.[3]).toBe(0.5);
+    vi.unstubAllEnvs();
+  });
+
+  it('restricts findSimilar and the recall vector arm to the current embedding_model', async () => {
+    vi.stubEnv('MEMORY_EMBED_MODEL', 'openai/text-embedding-3-large');
+    await service.remember({ scope: 's', kind: 'fact', title: 't', content: 'c' });
+    const similarSql = poolQueryMock.mock.calls.find(
+      ([sql]) =>
+        String(sql).includes('AS similarity') && String(sql).includes('FROM memory.memories')
+    )?.[0];
+    expect(String(similarSql)).toContain('embedding_model');
+    expect(findSimilarParams()?.[4]).toBe('openai/text-embedding-3-large');
+
+    await service.recall({ scope: 's', query: 'q', limit: 5 });
+    const recallSql = poolQueryMock.mock.calls.find(
+      ([sql]) => String(sql).includes('WITH q AS') && String(sql).includes('FULL OUTER JOIN')
+    )?.[0];
+    expect(String(recallSql)).toContain('m.embedding_model = $6');
+    expect(recallParams()?.[5]).toBe('openai/text-embedding-3-large');
     vi.unstubAllEnvs();
   });
 

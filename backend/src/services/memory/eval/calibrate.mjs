@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { memory } from './client.mjs';
-import { assertFixtureOnlyScope, valueAfterFlag } from './cli.mjs';
+import { assertFixtureOnlyScope, valueAfterFlag, vectorEligibleRows } from './cli.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const { memories, queries } = JSON.parse(
@@ -62,6 +62,8 @@ for (const r of rows) {
 
 const withSim = rows.filter((r) => r.similarity !== null);
 const missing = rows.filter((r) => r.similarity === null);
+const vectorEligible = vectorEligibleRows(rows);
+const keywordOnly = withSim.filter((r) => r.similarity <= 0);
 const byType = (t) => withSim.filter((r) => r.type === t).map((r) => r.similarity);
 const stats = (xs) => {
   if (!xs.length) {
@@ -81,15 +83,21 @@ if (missing.length) {
       `(each arm caps at 20). They are omitted from threshold-cut percentages.`
   );
 }
+if (keywordOnly.length) {
+  console.log(
+    `${keywordOnly.length} labeled target(s) were retrieved by the keyword arm only ` +
+      `(cosine ≤ 0 at threshold 0). Raising the vector threshold does not drop them.`
+  );
+}
 
 for (const t of [0.35, 0.4, 0.45, 0.5]) {
-  if (!withSim.length) {
-    console.log(`threshold ${t}: no retrieved labeled targets to cut`);
+  if (!vectorEligible.length) {
+    console.log(`threshold ${t}: no vector-arm labeled targets to cut`);
     continue;
   }
-  const cut = withSim.filter((r) => r.similarity <= t).length;
+  const cut = vectorEligible.filter((r) => r.similarity <= t).length;
   console.log(
-    `threshold ${t}: cuts ${cut}/${withSim.length} retrieved correct answers from the vector arm ` +
-      `(${((cut / withSim.length) * 100).toFixed(0)}%)`
+    `threshold ${t}: cuts ${cut}/${vectorEligible.length} vector-arm correct answers ` +
+      `(${((cut / vectorEligible.length) * 100).toFixed(0)}%)`
   );
 }

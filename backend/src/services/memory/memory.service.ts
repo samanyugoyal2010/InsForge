@@ -166,7 +166,8 @@ Examples:
     scope: string,
     embedding: number[],
     k: number,
-    threshold: number
+    threshold: number,
+    embedModel: string
   ): Promise<SimilarRow[]> {
     const pool = this.dbManager.getPool();
     const lit = this.toVectorLiteral(embedding);
@@ -175,10 +176,11 @@ Examples:
               1 - (embedding <=> $1::vector) AS similarity
          FROM memory.memories
         WHERE scope = $2
+          AND embedding_model = $5
           AND 1 - (embedding <=> $1::vector) > $3
         ORDER BY embedding <=> $1::vector
         LIMIT $4`,
-      [lit, scope, threshold, k]
+      [lit, scope, threshold, k, embedModel]
     );
     return result.rows as SimilarRow[];
   }
@@ -191,7 +193,7 @@ Examples:
     const pool = this.dbManager.getPool();
     const embedModel = resolveEmbedModel();
     const embedding = await this.embed(`${candidate.title}\n${candidate.content}`, embedModel);
-    const similar = await this.findSimilar(scope, embedding, 3, RECONCILE_THRESHOLD);
+    const similar = await this.findSimilar(scope, embedding, 3, RECONCILE_THRESHOLD, embedModel);
 
     let action: 'ADD' | 'UPDATE' | 'NOOP' = 'ADD';
     let decision: { action: string; target_id?: string; title?: string; content?: string } | null =
@@ -316,6 +318,7 @@ Return JSON {"action":"ADD"|"UPDATE"|"NOOP","target_id"?:string,"title"?:string,
     const embedding = await this.embed(params.query);
     const pool = this.dbManager.getPool();
     const threshold = params.threshold ?? resolveRecallThreshold();
+    const embedModel = resolveEmbedModel();
     // Hybrid recall via Reciprocal Rank Fusion (k=60, the standard constant):
     //  - vector arm keeps the cosine threshold, so unrelated queries still
     //    return nothing (no semantic noise);
@@ -323,13 +326,18 @@ Return JSON {"action":"ADD"|"UPDATE"|"NOOP","target_id"?:string,"title"?:string,
     //    paths, key names — that embeddings smear together.
     // A row matched by either arm is eligible; fused score ranks the union,
     // and a mild recency boost breaks ties toward current truth.
+    // Vector comparisons are restricted to the current embedding_model so a
+    // model switch cannot rank or reconcile across incompatible vector spaces.
+    // Keyword-only hits from another model keep lexical ranking; similarity
+    // is 0 rather than a cross-model cosine.
     const result = await pool.query(
       `WITH q AS (SELECT $1::vector AS qv, websearch_to_tsquery('english', $2) AS tsq),
        vec AS (
          SELECT m.id, 1 - (m.embedding <=> q.qv) AS sim,
                 row_number() OVER (ORDER BY m.embedding <=> q.qv) AS rnk
            FROM memory.memories m, q
-          WHERE m.scope = $3 AND 1 - (m.embedding <=> q.qv) > $4
+          WHERE m.scope = $3 AND m.embedding_model = $6
+            AND 1 - (m.embedding <=> q.qv) > $4
           ORDER BY m.embedding <=> q.qv LIMIT 20
        ),
        kw AS (
@@ -346,13 +354,24 @@ Return JSON {"action":"ADD"|"UPDATE"|"NOOP","target_id"?:string,"title"?:string,
            FROM vec FULL OUTER JOIN kw ON vec.id = kw.id
        )
        SELECT m.id, m.kind, m.title, m.content,
-              COALESCE(f.sim, 1 - (m.embedding <=> q.qv)) AS similarity,
+              CASE
+                WHEN f.sim IS NOT NULL THEN f.sim
+                WHEN m.embedding_model = $6 THEN 1 - (m.embedding <=> q.qv)
+                ELSE 0
+              END AS similarity,
               m.updated_at
          FROM fused f
          JOIN memory.memories m ON m.id = f.id, q
         ORDER BY f.rrf + 0.0001 * extract(epoch FROM m.updated_at) / 1e9 DESC
         LIMIT $5`,
-      [this.toVectorLiteral(embedding), params.query, params.scope, threshold, params.limit]
+      [
+        this.toVectorLiteral(embedding),
+        params.query,
+        params.scope,
+        threshold,
+        params.limit,
+        embedModel,
+      ]
     );
     return result.rows.map((r) => ({
       id: r.id,

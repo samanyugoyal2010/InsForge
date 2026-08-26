@@ -245,6 +245,8 @@ Return JSON {"action":"ADD"|"UPDATE"|"NOOP","target_id"?:string,"title"?:string,
       const content = decision.content ?? candidate.content;
       const newEmbedding = await this.embed(`${title}\n${content}`, embedModel);
       await pool.query(
+        // embedding_model travels with embedding — the row is re-embedded here, so
+        // leaving the old label behind would mislabel the vector it describes.
         `UPDATE memory.memories
             SET kind = $1, title = $2, content = $3, embedding = $4::vector,
                 embedding_model = $5, source = $6
@@ -254,7 +256,7 @@ Return JSON {"action":"ADD"|"UPDATE"|"NOOP","target_id"?:string,"title"?:string,
           title,
           content,
           this.toVectorLiteral(newEmbedding),
-          embedModel,
+          EMBED_MODEL,
           source ?? null,
           decision.target_id,
           scope,
